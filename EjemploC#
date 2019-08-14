@@ -1,0 +1,78 @@
+public class ServiceBusPipeFilter
+{
+  ...
+  private readonly string inQueuePath;
+  private readonly string outQueuePath;
+  ...
+  private QueueClient inQueue;
+  private QueueClient outQueue;
+  ...
+
+  public ServiceBusPipeFilter(..., string inQueuePath, string outQueuePath = null)
+  {
+     ...
+     this.inQueuePath = inQueuePath;
+     this.outQueuePath = outQueuePath;
+  }
+
+  public void Start()
+  {
+    ...
+    // Create the outbound filter queue if it doesn't exist.
+    ...
+    this.outQueue = QueueClient.CreateFromConnectionString(...);
+
+    ...
+    // Create the inbound and outbound queue clients.
+    this.inQueue = QueueClient.CreateFromConnectionString(...);
+  }
+
+  public void OnPipeFilterMessageAsync(
+    Func<BrokeredMessage, Task<BrokeredMessage>> asyncFilterTask, ...)
+  {
+    ...
+
+    this.inQueue.OnMessageAsync(
+      async (msg) =>
+    {
+      ...
+      // Process the filter and send the output to the
+      // next queue in the pipeline.
+      var outMessage = await asyncFilterTask(msg);
+
+      // Send the message from the filter processor
+      // to the next queue in the pipeline.
+      if (outQueue != null)
+      {
+        await outQueue.SendAsync(outMessage);
+      }
+
+      // Note: There's a chance that the same message could be sent twice
+      // or that a message gets processed by an upstream or downstream
+      // filter at the same time.
+      // This would happen in a situation where processing of a message was
+      // completed, it was sent to the next pipe/queue, and then failed
+      // to complete when using the PeekLock method.
+      // Idempotent message processing and concurrency should be considered
+      // in a real-world implementation.
+    },
+    options);
+  }
+
+  public async Task Close(TimeSpan timespan)
+  {
+    // Pause the processing threads.
+    this.pauseProcessingEvent.Reset();
+
+    // There's no clean approach for waiting for the threads to complete
+    // the processing. This example simply stops any new processing, waits
+    // for the existing thread to complete, then closes the message pump
+    // and finally returns.
+    Thread.Sleep(timespan);
+
+    this.inQueue.Close();
+    ...
+  }
+
+  ...
+}
